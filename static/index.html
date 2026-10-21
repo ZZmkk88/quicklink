@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>quicklink · 短链工坊</title>
+<style>
+  :root{
+    --ink:#0f2e2b; --teal:#0e7c6f; --teal-dark:#0a5c53; --paper:#f4f1ea;
+    --card:#fffdf8; --line:#ddd5c4; --warn:#b3541e; --danger:#a93226;
+    --muted:#6d7268;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--paper);color:#22302d}
+  header{background:var(--ink);color:#eaf3f0;padding:18px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header .logo{font-size:22px;font-weight:700;letter-spacing:.5px}
+  header .logo span{color:#57c7b2}
+  header .tag{font-size:12px;color:#9dbdb5;border:1px solid #2c554f;border-radius:999px;padding:2px 10px}
+  header .spacer{flex:1}
+  header button{background:transparent;border:1px solid #3d6f68;color:#cfe6e0;border-radius:8px;padding:6px 12px;cursor:pointer}
+  main{max-width:960px;margin:0 auto;padding:20px 16px 60px}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px;box-shadow:0 1px 3px rgba(30,40,35,.06)}
+  .panel h2{margin:0 0 12px;font-size:16px;color:var(--ink)}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row>*{flex:1;min-width:140px}
+  input,select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:14px;background:#fff}
+  button.primary{background:var(--teal);color:#fff;border:none;border-radius:9px;padding:10px 18px;font-size:14px;cursor:pointer}
+  button.primary:hover{background:var(--teal-dark)}
+  button.ghost{background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;font-size:13px}
+  button.danger{color:var(--danger);border-color:#e0b6b0}
+  .msg{min-height:20px;font-size:13px;color:var(--warn);margin-top:8px}
+  .link-card{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px;background:#fff}
+  .link-card.off{opacity:.55}
+  .short{font-size:18px;font-weight:700;color:var(--teal-dark);word-break:break-all}
+  .orig{font-size:13px;color:var(--muted);word-break:break-all;margin:4px 0 8px}
+  .meta{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;align-items:center}
+  .clicks b{color:var(--ink);font-size:15px}
+  .badge{font-size:11px;border-radius:999px;padding:1px 8px;border:1px solid var(--teal);color:var(--teal-dark)}
+  .badge.off{border-color:#bbb;color:#888}
+  .stats{display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px;font-size:13px}
+  .stats table{width:100%;border-collapse:collapse}
+  .stats td,.stats th{padding:4px 6px;border-bottom:1px solid #eee7d6;text-align:left}
+  #loginView{max-width:420px;margin:60px auto}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">quick<span>link</span></div>
+  <div class="tag">短链工坊 · 自托管</div>
+  <div class="spacer"></div>
+  <span id="whoami"></span>
+  <button id="btnPwd" class="hidden">改密码</button>
+  <button id="btnLogout" class="hidden">退出</button>
+</header>
+
+<main>
+  <!-- 登录 -->
+  <section id="loginView" class="panel">
+    <h2>登录</h2>
+    <div class="row"><input id="loginUser" placeholder="用户名" autocomplete="username"></div>
+    <div class="row" style="margin-top:10px"><input id="loginPass" type="password" placeholder="密码" autocomplete="current-password"></div>
+    <div class="row" style="margin-top:14px"><button class="primary" id="btnLogin">登录</button></div>
+    <div class="msg" id="loginMsg"></div>
+  </section>
+
+  <!-- 主界面 -->
+  <section id="appView" class="hidden">
+    <div class="panel" id="pwdPanel">
+      <h2>生成短链</h2>
+      <div class="row">
+        <input id="inUrl" placeholder="把长网址贴到这里，如 https://example.com/a/very/long/path" style="flex:3">
+      </div>
+      <div class="row" style="margin-top:10px">
+        <input id="inCustom" placeholder="自定义后缀（可选，如 mydoc，2-32 位字母数字 - _)">
+        <button class="primary" id="btnCreate">生成短链</button>
+      </div>
+      <div class="msg" id="createMsg"></div>
+      <div id="newLinkBox" class="hidden" style="margin-top:6px;font-size:15px">
+        新短链：<a id="newLink" href="#" target="_blank" rel="noopener"></a>
+        <button class="ghost" id="btnCopy">复制</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>我的短链</h2>
+      <div class="row">
+        <input id="inSearch" placeholder="搜索长网址或短码">
+        <select id="selSort" style="flex:0 0 170px">
+          <option value="recent">按创建时间（新→旧）</option>
+          <option value="clicks">按点击量（多→少）</option>
+        </select>
+        <button class="ghost" id="btnSearch" style="flex:0 0 90px">搜索</button>
+      </div>
+      <div id="listBox" style="margin-top:14px"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let token = localStorage.getItem('ql_token') || '';
+
+function authHeaders(){ return {'Content-Type':'application/json','Authorization':'Bearer '+token}; }
+async function api(path, opts={}){
+  const r = await fetch(path, {headers: authHeaders(), ...opts});
+  if(r.status === 401 && token){ logout(false); }
+  return r;
+}
+function fmtTime(iso){ return iso ? iso.replace('T',' ').replace('Z','') + ' UTC' : ''; }
+
+async function doLogin(){
+  const r = await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({username: $('#loginUser').value, password: $('#loginPass').value})});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ $('#loginMsg').textContent = data.detail || '登录失败'; return; }
+  token = data.token; localStorage.setItem('ql_token', token);
+  if(data.must_change_password) alert('这是初始密码，建议立刻点右上角「改密码」换掉。');
+  enterApp();
+}
+function logout(clear=true){
+  if(clear && token) fetch('/api/logout',{method:'POST',headers:authHeaders()}).catch(()=>{});
+  token=''; localStorage.removeItem('ql_token');
+  $('#appView').classList.add('hidden'); $('#loginView').classList.remove('hidden');
+  $('#btnLogout').classList.add('hidden'); $('#btnPwd').classList.add('hidden'); $('#whoami').textContent='';
+}
+async function enterApp(){
+  const r = await api('/api/me');
+  if(!r.ok){ $('#loginView').classList.remove('hidden'); return; }
+  const me = await r.json();
+  $('#whoami').textContent = me.username;
+  $('#loginView').classList.add('hidden'); $('#appView').classList.remove('hidden');
+  $('#btnLogout').classList.remove('hidden'); $('#btnPwd').classList.remove('hidden');
+  loadLinks();
+}
+async function createLink(){
+  const body = {url: $('#inUrl').value.trim()};
+  const custom = $('#inCustom').value.trim();
+  if(custom) body.custom_code = custom;
+  const r = await api('/api/links',{method:'POST', body: JSON.stringify(body)});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ $('#createMsg').textContent = data.detail || '生成失败'; return; }
+  $('#createMsg').textContent = '';
+  const full = location.origin + data.short_path;
+  const a = $('#newLink'); a.textContent = full; a.href = data.short_path;
+  $('#newLinkBox').classList.remove('hidden');
+  $('#btnCopy').onclick = ()=> navigator.clipboard && navigator.clipboard.writeText(full);
+  $('#inUrl').value=''; $('#inCustom').value='';
+  loadLinks();
+}
+async function loadLinks(){
+  const q = encodeURIComponent($('#inSearch').value.trim());
+  const sort = $('#selSort').value;
+  const r = await api(`/api/links?q=${q}&sort=${sort}`);
+  const links = await r.json().catch(()=>[]);
+  const box = $('#listBox'); box.innerHTML = '';
+  if(!links.length){ box.innerHTML = '<p style="color:var(--muted)">还没有短链，先生成一条吧。</p>'; return; }
+  for(const l of links){
+    const card = document.createElement('div');
+    card.className = 'link-card' + (l.active ? '' : ' off');
+    card.innerHTML = `
+      <div class="short">${location.origin}/${l.code}</div>
+      <div class="orig">→ ${escapeHtml(l.url)}</div>
+      <div class="meta">
+        <span class="clicks">点击 <b>${l.clicks}</b> 次</span>
+        <span class="badge ${l.active?'':'off'}">${l.active?'启用中':'已停用'}</span>
+        <span style="color:var(--muted)">建于 ${fmtTime(l.created_at)}</span>
+        <span style="flex:1"></span>
+        <button class="ghost" data-act="stats">统计</button>
+        <button class="ghost" data-act="toggle">${l.active?'停用':'启用'}</button>
+        <button class="ghost danger" data-act="del">删除</button>
+      </div>
+      <div class="stats"></div>`;
+    card.querySelector('[data-act="toggle"]').onclick = async ()=>{
+      await api(`/api/links/${l.id}`,{method:'PATCH', body: JSON.stringify({active: !l.active})});
+      loadLinks();
+    };
+    card.querySelector('[data-act="del"]').onclick = async ()=>{
+      if(!confirm('删除这条短链？它的点击记录也会一并删掉。')) return;
+      await api(`/api/links/${l.id}`,{method:'DELETE'});
+      loadLinks();
+    };
+    card.querySelector('[data-act="stats"]').onclick = async (ev)=>{
+      const box2 = card.querySelector('.stats');
+      if(box2.style.display === 'block'){ box2.style.display='none'; return; }
+      const r2 = await api(`/api/links/${l.id}/clicks?limit=20`);
+      const d = await r2.json().catch(()=>({recent:[]}));
+      let html = `<p>总点击 <b>${d.total_clicks ?? l.clicks}</b> 次，最近记录：</p>`;
+      if(!d.recent || !d.recent.length) html += '<p style="color:var(--muted)">还没有人点过。</p>';
+      else{
+        html += '<table><tr><th>时间</th><th>来源</th><th>设备大类</th></tr>';
+        for(const c of d.recent) html += `<tr><td>${fmtTime(c.clicked_at)}</td><td>${escapeHtml(c.referer||'（直接访问）')}</td><td>${escapeHtml(c.ua_class)}</td></tr>`;
+        html += '</table>';
+      }
+      box2.innerHTML = html; box2.style.display='block';
+      ev.target.textContent = '收起统计';
+    };
+    box.appendChild(card);
+  }
+}
+function escapeHtml(s){ const d=document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+$('#btnLogin').onclick = doLogin;
+$('#loginPass').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+$('#btnLogout').onclick = ()=>logout(true);
+$('#btnCreate').onclick = createLink;
+$('#btnSearch').onclick = loadLinks;
+$('#selSort').onchange = loadLinks;
+$('#btnPwd').onclick = async ()=>{
+  const old = prompt('输入旧密码'); if(old===null) return;
+  const nw = prompt('输入新密码（至少 6 位）'); if(nw===null) return;
+  const r = await api('/api/change-password',{method:'POST', body: JSON.stringify({old_password: old, new_password: nw})});
+  const d = await r.json().catch(()=>({}));
+  alert(r.ok ? '密码已修改' : (d.detail || '修改失败'));
+};
+if(token) enterApp();
+</script>
+</body>
+</html>
