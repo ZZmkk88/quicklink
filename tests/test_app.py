@@ -1,11 +1,14 @@
 """quicklink 自动化测试：登录、生成、跳转、停用、统计、搜索排序、删除、改密。"""
 
+import hashlib
 import os
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 # 用临时数据库，必须在 import app 之前设置
@@ -274,3 +277,75 @@ def test_search_wildcard_escaped(client):
     r3 = client.get("/api/links", params={"q": "pop_"}, headers=h)
     assert r3.status_code == 200
     assert r3.json() == []
+
+
+def _fresh_token(client):
+    r = client.post("/api/login", json={"username": "admin", "password": "admin123"})
+    assert r.status_code == 200
+    return {"Authorization": f"Bearer {r.json()['token']}"}
+
+
+def test_validate_url_rejects_control_chars_and_backslash(client):
+    h = _fresh_token(client)
+    r = client.post(
+        "/api/links", json={"url": "http://example.com/\x01abc"}, headers=h
+    )
+    assert r.status_code == 400
+    r2 = client.post(
+        "/api/links", json={"url": "https://example.com/a\\b"}, headers=h
+    )
+    assert r2.status_code == 400
+    # 正常网址不受影响
+    r3 = client.post(
+        "/api/links",
+        json={"url": "https://example.com/ok-path?a=1&b=2", "custom_code": "clean1"},
+        headers=h,
+    )
+    assert r3.status_code == 201
+
+
+def test_sessions_store_token_hash(client):
+    r = client.post("/api/login", json={"username": "admin", "password": "admin123"})
+    raw = r.json()["token"]
+    expected = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    conn = sqlite3.connect(os.environ["QL_DB_PATH"])
+    try:
+        stored = conn.execute(
+            "SELECT 1 FROM sessions WHERE token = ?", (expected,)
+        ).fetchone()
+        plaintext = conn.execute(
+            "SELECT 1 FROM sessions WHERE token = ?", (raw,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert stored is not None
+    assert plaintext is None
+
+
+def test_code_case_insensitive_conflict(client):
+    h = _fresh_token(client)
+    r = client.post(
+        "/api/links",
+        json={"url": "https://example.com/case", "custom_code": "CaseMix1"},
+        headers=h,
+    )
+    assert r.status_code == 201
+    r2 = client.post(
+        "/api/links",
+        json={"url": "https://example.com/other", "custom_code": "casemix1"},
+        headers=h,
+    )
+    assert r2.status_code == 409
+    # 大小写不同写法跳转到同一条
+    resp = client.get("/CASEMIX1", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "https://example.com/case"
+
+
+def test_reserved_code_html_404(client):
+    r = client.get("/favicon.ico")
+    assert r.status_code == 404
+    assert "text/html" in r.headers["content-type"]
+    assert "这个短链不存在" in r.text
+
+
