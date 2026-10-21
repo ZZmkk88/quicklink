@@ -214,3 +214,35 @@ def test_change_password_flow(client):
         json={"old_password": "newpass456", "new_password": "admin123"},
         headers={"Authorization": f"Bearer {token2}"},
     )
+
+
+def test_change_password_revokes_other_sessions(client):
+    ra = client.post("/api/login", json={"username": "admin", "password": "admin123"})
+    rb = client.post("/api/login", json={"username": "admin", "password": "admin123"})
+    ha = {"Authorization": f"Bearer {ra.json()['token']}"}
+    hb = {"Authorization": f"Bearer {rb.json()['token']}"}
+    rc = client.post(
+        "/api/change-password",
+        json={"old_password": "admin123", "new_password": "revoke123"},
+        headers=ha,
+    )
+    assert rc.status_code == 200
+    assert client.get("/api/me", headers=ha).status_code == 200  # 本次会话保留
+    assert client.get("/api/me", headers=hb).status_code == 401  # 其他会话被吊销
+    # 恢复默认密码
+    client.post(
+        "/api/change-password",
+        json={"old_password": "revoke123", "new_password": "admin123"},
+        headers=ha,
+    )
+
+
+def test_docs_endpoints_disabled(client):
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        r = client.get(path)
+        assert r.status_code == 404
+    # 健康检查与首页不受影响
+    assert client.get("/health").status_code == 200
+    assert client.get("/").status_code == 200
+
+

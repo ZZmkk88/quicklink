@@ -112,7 +112,13 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="quicklink", lifespan=lifespan)
+app = FastAPI(
+    title="quicklink",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 
 # ---------- 工具函数 ----------
@@ -255,18 +261,28 @@ def logout(request: Request, user: sqlite3.Row = Depends(current_user)):
 
 
 @app.post("/api/change-password")
-def change_password(body: ChangePasswordIn, user: sqlite3.Row = Depends(current_user)):
+def change_password(
+    body: ChangePasswordIn,
+    request: Request,
+    user: sqlite3.Row = Depends(current_user),
+):
     if hash_password(body.old_password, user["salt"]) != user["password_hash"]:
         raise HTTPException(status_code=400, detail="旧密码不对")
     if len(body.new_password) < 6:
         raise HTTPException(status_code=400, detail="新密码至少 6 位")
     salt = secrets.token_hex(16)
+    token = request.headers.get("Authorization", "")[len("Bearer "):].strip()
     conn = get_db()
     try:
         conn.execute(
             "UPDATE users SET password_hash = ?, salt = ?, must_change_password = 0"
             " WHERE id = ?",
             (hash_password(body.new_password, salt), salt, user["id"]),
+        )
+        # 口令已更换：作废其他会话，只留本次请求使用的 token
+        conn.execute(
+            "DELETE FROM sessions WHERE user_id = ? AND token != ?",
+            (user["id"], token),
         )
         conn.commit()
     finally:
