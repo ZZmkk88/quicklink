@@ -156,6 +156,11 @@ def generate_code(conn: sqlite3.Connection) -> str:
     raise HTTPException(status_code=500, detail="短码生成失败，请重试")
 
 
+def escape_like(s: str) -> str:
+    r"""转义 LIKE 通配符：搜索词里的 %、_、\ 只按字面匹配。"""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def classify_ua(ua: str) -> str:
     """把 User-Agent 粗分成几类，只存大类不存原文。"""
     if not ua:
@@ -268,6 +273,8 @@ def change_password(
 ):
     if hash_password(body.old_password, user["salt"]) != user["password_hash"]:
         raise HTTPException(status_code=400, detail="旧密码不对")
+    if body.new_password == body.old_password:
+        raise HTTPException(status_code=400, detail="新密码不能和旧密码相同")
     if len(body.new_password) < 6:
         raise HTTPException(status_code=400, detail="新密码至少 6 位")
     salt = secrets.token_hex(16)
@@ -339,9 +346,10 @@ def list_links(
     conn = get_db()
     try:
         if q:
-            like = f"%{q}%"
+            like = f"%{escape_like(q)}%"
             rows = conn.execute(
-                f"SELECT * FROM links WHERE user_id = ? AND (url LIKE ? OR code LIKE ?)"
+                f"SELECT * FROM links WHERE user_id = ? AND (url LIKE ? ESCAPE '\\'"
+                f" OR code LIKE ? ESCAPE '\\')"
                 f" ORDER BY {order}",
                 (user["id"], like, like),
             ).fetchall()

@@ -237,6 +237,21 @@ def test_change_password_revokes_other_sessions(client):
     )
 
 
+def test_change_password_same_rejected(client):
+    r = client.post("/api/login", json={"username": "admin", "password": "admin123"})
+    h = {"Authorization": f"Bearer {r.json()['token']}"}
+    me_before = client.get("/api/me", headers=h).json()
+    rc = client.post(
+        "/api/change-password",
+        json={"old_password": "admin123", "new_password": "admin123"},
+        headers=h,
+    )
+    assert rc.status_code == 400
+    # 什么都没发生：token 仍有效，改密标志原样
+    me_after = client.get("/api/me", headers=h).json()
+    assert me_after["must_change_password"] == me_before["must_change_password"]
+
+
 def test_docs_endpoints_disabled(client):
     for path in ("/docs", "/redoc", "/openapi.json"):
         r = client.get(path)
@@ -246,3 +261,16 @@ def test_docs_endpoints_disabled(client):
     assert client.get("/").status_code == 200
 
 
+def test_search_wildcard_escaped(client):
+    # 前面的改密测试吊销过会话，这里自己重新登录，不依赖 module 级 fixture
+    r = client.post("/api/login", json={"username": "admin", "password": "admin123"})
+    assert r.status_code == 200
+    h = {"Authorization": f"Bearer {r.json()['token']}"}
+    # "%" 未转义时会匹配全部；转义后应只匹配字面含 % 的链接（这里没有）
+    r2 = client.get("/api/links", params={"q": "%"}, headers=h)
+    assert r2.status_code == 200
+    assert r2.json() == []
+    # "_" 未转义时会命中 pop1；转义后应只匹配字面含 pop_ 的链接（这里没有）
+    r3 = client.get("/api/links", params={"q": "pop_"}, headers=h)
+    assert r3.status_code == 200
+    assert r3.json() == []
