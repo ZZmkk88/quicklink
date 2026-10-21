@@ -30,3 +30,37 @@ Grok 本轮报告（grok/TASK-032-quicklink，基座 == 当时 main）：P0 无�
 - **留待后续（本轮未采纳）**：P2-1（网址含 CR/LF/NUL 控制字符）、P2-4（会话 token
   明文入库）、P2-6（短码大小写各算一条）、P2-7（保留字短码走 JSON 404 而非 HTML 提示页）。
   均未动行为，留待后续轮次评估。
+
+## 2026-10-21 · TASK-051 / TASK-041 合并
+
+两轮基座均为当时 main，报告逐条核验 diff 一致，测试文件未动。
+
+### TASK-051（review+fix）：5 项全部采纳
+
+- ① `validate_url` 拒绝 ASCII 控制字符（码点 <32 或 ==127）与反斜杠，
+  避免写进跳转 Location（原 TASK-032 的 P2-1，留待项销项）。
+- ② 会话表只存 token 的 SHA-256（登录响应仍返回原始 token；
+  **升级后老会话失效，需重新登录一次**）。四个触点一致：
+  登录写入、current_user 校验、logout 删除、改密吊销其他会话
+  （原 P2-4，留待项销项；符合口径第 7 条隐私减量、第 8 条参数化查询不硬改 compare_digest）。
+- ③ 短码占用检查、跳转查找、随机码防撞三处加 `COLLATE NOCASE`
+  大小写折叠（原 P2-6，留待项销项）。已知限制：UNIQUE 索引仍是二进制比较，
+  应用层 409 兜底避免脏数据；建库 init 不改索引以免脏库 init 失败。
+- ④ 保留字短码 404 改为与缺失短码统一的 HTML 提示页（原 P2-7，留待项销项）。
+- ⑤ NOTES.md 文案修正：删掉"实测见 README 的测试一节"的不实引用
+  （README 只有命令没有核数/内存数字）。
+- 明确不修：强制改密（按本文件 2026-10-21 节与口径第 1 条关闭）。
+
+### TASK-041（review）：去重后评估
+
+与 051 按内容去重：P2-1～P2-4 已被 051 覆盖；"默认口令不强制更换"、
+"短码 innerHTML" 按本文件既有条目关闭，不复议。
+
+- **采纳**：安全响应头中间件（X-Frame-Options: DENY、
+  Content-Security-Policy: frame-ancestors 'none'、
+  X-Content-Type-Options: nosniff，与 taskboard 同口径）；
+  `/health` 加 `SELECT 1` 查库（失败 503）；
+  并发下短码唯一约束冲突捕获 `IntegrityError` 转 409
+  （`_insert_link_row`，确定性单测覆盖竞态分支）。
+- **不动**：httpx 的 Starlette 弃用警告、python-multipart 未被引用
+  （依赖约束，不改版本）。
