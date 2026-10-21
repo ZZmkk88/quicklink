@@ -56,6 +56,11 @@ def hash_password(password: str, salt_hex: str) -> str:
     ).hex()
 
 
+def hash_token(token: str) -> str:
+    """会话表只存 token 的 SHA-256。token 本身是 256 位随机值，校验时对请求值做同样哈希。"""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def init_db() -> None:
     conn = get_db()
     try:
@@ -125,6 +130,9 @@ app = FastAPI(
 
 def validate_url(url: str) -> str:
     url = (url or "").strip()
+    # ASCII 控制字符（含 CR/LF/NUL）和反斜杠不进跳转目标，避免写进 Location
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in url) or "\\" in url:
+        raise HTTPException(status_code=400, detail="网址含有非法字符")
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise HTTPException(status_code=400, detail="网址不合法，需要以 http:// 或 https:// 开头")
@@ -149,7 +157,7 @@ def generate_code(conn: sqlite3.Connection) -> str:
         if code.lower() in RESERVED_CODES:
             continue
         exists = conn.execute(
-            "SELECT 1 FROM links WHERE code = ?", (code,)
+            "SELECT 1 FROM links WHERE code = ? COLLATE NOCASE", (code,)
         ).fetchone()
         if exists is None:
             return code
@@ -185,7 +193,7 @@ def current_user(request: Request) -> sqlite3.Row:
         row = conn.execute(
             "SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id"
             " WHERE s.token = ? AND s.expires_at > ?",
-            (token, time.time()),
+            (hash_token(token), time.time()),
         ).fetchone()
     finally:
         conn.close()
@@ -241,7 +249,7 @@ def login(body: LoginIn):
         token = secrets.token_urlsafe(32)
         conn.execute(
             "INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)",
-            (token, user["id"], time.time() + TOKEN_TTL_SECONDS),
+            (hash_token(token), user["id"], time.time() + TOKEN_TTL_SECONDS),
         )
         conn.commit()
         return {
@@ -258,7 +266,7 @@ def logout(request: Request, user: sqlite3.Row = Depends(current_user)):
     token = request.headers.get("Authorization", "")[len("Bearer "):].strip()
     conn = get_db()
     try:
-        conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        conn.execute("DELETE FROM sessions WHERE token = ?", (hash_token(token),))
         conn.commit()
     finally:
         conn.close()
@@ -289,7 +297,7 @@ def change_password(
         # 口令已更换：作废其他会话，只留本次请求使用的 token
         conn.execute(
             "DELETE FROM sessions WHERE user_id = ? AND token != ?",
-            (user["id"], token),
+            (user["id"], hash_token(token)),
         )
         conn.commit()
     finally:
@@ -315,7 +323,7 @@ def create_link(body: LinkIn, user: sqlite3.Row = Depends(current_user)):
         if body.custom_code:
             code = validate_custom_code(body.custom_code)
             exists = conn.execute(
-                "SELECT 1 FROM links WHERE code = ?", (code,)
+                "SELECT 1 FROM links WHERE code = ? COLLATE NOCASE", (code,)
             ).fetchone()
             if exists is not None:
                 raise HTTPException(status_code=409, detail="这个后缀已被占用，换一个")
@@ -445,11 +453,13 @@ def index():
 @app.get("/{code}")
 def redirect_code(code: str, request: Request):
     if code.lower() in RESERVED_CODES:
-        raise HTTPException(status_code=404, detail="短链不存在")
+        return HTMLResponse(
+            "<h1>404</h1><p>这个短链不存在。</p>", status_code=404
+        )
     conn = get_db()
     try:
         row = conn.execute(
-            "SELECT * FROM links WHERE code = ?", (code,)
+            "SELECT * FROM links WHERE code = ? COLLATE NOCASE", (code,)
         ).fetchone()
         if row is None:
             return HTMLResponse(
