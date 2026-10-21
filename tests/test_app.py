@@ -349,3 +349,30 @@ def test_reserved_code_html_404(client):
     assert "这个短链不存在" in r.text
 
 
+def test_security_headers(client):
+    r = client.get("/")
+    assert r.headers.get("X-Content-Type-Options") == "nosniff"
+    assert r.headers.get("X-Frame-Options") == "DENY"
+    assert r.headers.get("Content-Security-Policy") == "frame-ancestors 'none'"
+
+
+def test_insert_link_row_conflict_409(client):
+    h = _fresh_token(client)
+    r = client.post(
+        "/api/links",
+        json={"url": "https://example.com/race", "custom_code": "race1"},
+        headers=h,
+    )
+    assert r.status_code == 201
+    conn = app_module.get_db()
+    try:
+        user_id = conn.execute(
+            "SELECT id FROM users WHERE username = 'admin'"
+        ).fetchone()["id"]
+        with pytest.raises(HTTPException) as exc:
+            app_module._insert_link_row(
+                conn, "race1", "https://example.com/other", user_id
+            )
+        assert exc.value.status_code == 409
+    finally:
+        conn.close()

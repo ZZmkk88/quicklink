@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -124,6 +124,15 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 # ---------- 工具函数 ----------
@@ -329,13 +338,10 @@ def create_link(body: LinkIn, user: sqlite3.Row = Depends(current_user)):
                 raise HTTPException(status_code=409, detail="这个后缀已被占用，换一个")
         else:
             code = generate_code(conn)
-        cur = conn.execute(
-            "INSERT INTO links (code, url, created_at, user_id) VALUES (?, ?, ?, ?)",
-            (code, url, utcnow_iso(), user["id"]),
-        )
+        link_id = _insert_link_row(conn, code, url, user["id"])
         conn.commit()
         row = conn.execute(
-            "SELECT * FROM links WHERE id = ?", (cur.lastrowid,)
+            "SELECT * FROM links WHERE id = ?", (link_id,)
         ).fetchone()
         return link_to_dict(row)
     finally:
@@ -378,6 +384,18 @@ def _load_link(conn: sqlite3.Connection, user_id: int, link_id: int) -> sqlite3.
     if row is None:
         raise HTTPException(status_code=404, detail="短链不存在")
     return row
+
+
+def _insert_link_row(conn: sqlite3.Connection, code: str, url: str, user_id: int) -> int:
+    """插入短链行。并发竞态下短码撞车（唯一约束）时返回 409 而不是 500。"""
+    try:
+        cur = conn.execute(
+            "INSERT INTO links (code, url, created_at, user_id) VALUES (?, ?, ?, ?)",
+            (code, url, utcnow_iso(), user_id),
+        )
+        return cur.lastrowid
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="这个后缀刚刚被别人占用了，换一个")
 
 
 @app.patch("/api/links/{link_id}")
@@ -437,6 +455,16 @@ def list_clicks(link_id: int, limit: int = 20, user: sqlite3.Row = Depends(curre
 
 @app.get("/health")
 def health():
+    try:
+        conn = get_db()
+        try:
+            conn.execute("SELECT 1").fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        return JSONResponse(
+            {"status": "error", "app": "quicklink"}, status_code=503
+        )
     return {"status": "ok", "app": "quicklink"}
 
 
